@@ -940,6 +940,29 @@ def delete_busy_dimensions_by_tag(dim_tag):
     return count
 
 
+def delete_busy_dimensions_filtered(dim_tag="", sources=None, group_prefix=""):
+    sources = set(sources or [])
+    count = 0
+    for obj in list(bpy.data.objects):
+        if not obj.get("busy_layout_dimension"):
+            continue
+        if dim_tag and str(obj.get("busy_layout_dim_tag", "")) != dim_tag:
+            continue
+        if sources and str(obj.get("busy_layout_dim_source", "")) not in sources:
+            continue
+        if group_prefix and not str(obj.get("busy_layout_dim_group", "")).startswith(group_prefix):
+            continue
+        data = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        try:
+            if data and data.users == 0 and data.__class__.__name__ == "Curve":
+                bpy.data.curves.remove(data)
+        except Exception:
+            pass
+        count += 1
+    return count
+
+
 def write_html_sheet(output_dir, props, image_records):
     output_dir = Path(output_dir)
     sheet_path = output_dir / "busy_layout_sheet.html"
@@ -1185,6 +1208,7 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     busy_tag_apply_children: bpy.props.BoolProperty(name="자식에도 태그 적용", default=False)
     component_dim_include_y: bpy.props.BoolProperty(name="컴포넌트 세로도 생성", default=True)
     component_dim_internal: bpy.props.BoolProperty(name="부모 내부 자식 치수 생성", default=True)
+    component_dim_replace_existing: bpy.props.BoolProperty(name="기존 컴포넌트 치수 교체", default=True)
     component_dim_internal_offset: bpy.props.FloatProperty(name="내부 치수선 거리", default=0.16, min=0.001, max=10.0)
     component_dim_x_side: bpy.props.EnumProperty(
         name="컴포넌트 가로 치수 방향",
@@ -1431,6 +1455,9 @@ class BL_OT_add_selected_component_dimensions(bpy.types.Operator):
             self.report({"ERROR"}, "치수선을 만들 선택 컴포넌트가 없습니다.")
             return {"CANCELLED"}
 
+        if props.component_dim_replace_existing:
+            delete_busy_dimensions_filtered(sources=[obj.name for obj in targets])
+
         scene_min, scene_max = objects_bbox_min_max(drawing_objects(context, False))
         scene_center = (scene_min + scene_max) * 0.5
         created = 0
@@ -1470,6 +1497,9 @@ class BL_OT_add_tag_component_dimensions(bpy.types.Operator):
             self.report({"ERROR"}, f"'{tag}' 태그가 붙은 최상위 컴포넌트가 없습니다.")
             return {"CANCELLED"}
 
+        if props.component_dim_replace_existing:
+            delete_busy_dimensions_filtered(dim_tag=tag)
+
         scene_min, scene_max = objects_bbox_min_max(drawing_objects(context, False))
         scene_center = (scene_min + scene_max) * 0.5
         created = 0
@@ -1507,6 +1537,8 @@ class BL_OT_add_active_parent_component_dimensions(bpy.types.Operator):
 
         tag = object_busy_tag(active) or busy_tag_from_props(props)
         min_v, max_v = object_bbox_min_max(active)
+        if props.component_dim_replace_existing:
+            delete_busy_dimensions_filtered(group_prefix=f"{tag}:{active.name}:")
         created = len(add_bbox_dimensions_for_bounds(
             f"BL_DIM_PARENT_TOTAL_{safe_filename(active.name)}",
             min_v,
@@ -1941,6 +1973,7 @@ class BL_PT_panel(bpy.types.Panel):
             row = box.row(align=True)
             row.prop(props, "component_dim_include_y")
             row.prop(props, "component_dim_internal")
+            box.prop(props, "component_dim_replace_existing")
             box.prop(props, "component_dim_internal_offset")
             row = box.row(align=True)
             row.prop(props, "component_dim_x_side")

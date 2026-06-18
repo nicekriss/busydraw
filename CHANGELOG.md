@@ -8,6 +8,7 @@
 - Added tag dimension visibility controls to hide, show, or delete only the dimensions belonging to the active tag.
 - Added selected-component dimension hiding for local cleanup when one parent/component's dimensions get crowded.
 - Changed component dimension placement to default to the scene-center side, so dimensions for furniture near a wall tend to stay inside the room instead of outside the wall.
+- Added default replacement for existing component/tag dimensions so repeated test clicks do not silently stack duplicate dimension curves and text.
 - Updated generated sheets to identify v0.10-dev.
 
 ## v0.9-dev
