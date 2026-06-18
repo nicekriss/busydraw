@@ -99,14 +99,30 @@ def objects_bbox_min_max(objs):
     corners = []
     for obj in objs:
         try:
-            for c in obj.bound_box:
-                corners.append(obj.matrix_world @ Vector(c))
+            min_v, max_v = object_bbox_min_max(obj)
+            corners.extend((
+                Vector((min_v.x, min_v.y, min_v.z)),
+                Vector((min_v.x, min_v.y, max_v.z)),
+                Vector((min_v.x, max_v.y, min_v.z)),
+                Vector((min_v.x, max_v.y, max_v.z)),
+                Vector((max_v.x, min_v.y, min_v.z)),
+                Vector((max_v.x, min_v.y, max_v.z)),
+                Vector((max_v.x, max_v.y, min_v.z)),
+                Vector((max_v.x, max_v.y, max_v.z)),
+            ))
         except Exception:
             try:
                 corners.append(obj.matrix_world.translation)
             except Exception:
                 continue
     return bbox_min_max(corners)
+
+
+def object_has_child_bounds(obj):
+    return any(
+        child.visible_get() and not child.name.startswith("BL_") and hasattr(child, "bound_box")
+        for child in obj.children_recursive
+    )
 
 
 def busy_tag_from_props(props):
@@ -1232,7 +1248,7 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
         name="두 오브젝트 치수 기준",
         items=[
             ("BBOX_GAP", "가까운 면", "두 오브젝트 bbox의 가까운 면 사이 간격을 잽니다."),
-            ("CENTER", "중심", "두 오브젝트 원점 사이 거리를 잽니다."),
+            ("CENTER", "bbox 중심", "두 오브젝트 bbox 중심 사이 거리를 잽니다. 부모 컴포넌트가 있으면 가까운 면 기준으로 자동 전환됩니다."),
         ],
         default="BBOX_GAP",
     )
@@ -1350,7 +1366,7 @@ class BL_OT_add_bbox_dimensions(bpy.types.Operator):
 class BL_OT_add_two_object_dimension(bpy.types.Operator):
     bl_idname = "busy_layout.add_two_object_dimension"
     bl_label = "두 오브젝트 간격 치수선"
-    bl_description = "선택한 두 오브젝트의 bbox 가까운 면 또는 중심 사이 평면 치수선을 생성합니다."
+    bl_description = "선택한 두 오브젝트의 bbox 가까운 면 사이 평면 치수선을 생성합니다. 부모 Empty는 자식 bbox를 컴포넌트로 봅니다."
 
     def execute(self, context):
         props = context.scene.busy_layout_props
@@ -1358,9 +1374,12 @@ class BL_OT_add_two_object_dimension(bpy.types.Operator):
         if len(objs) != 2:
             self.report({"ERROR"}, "오브젝트 2개를 선택해야 합니다.")
             return {"CANCELLED"}
-        if props.two_object_dim_mode == "CENTER":
-            p1 = objs[0].matrix_world.translation
-            p2 = objs[1].matrix_world.translation
+        force_bbox_gap = any(object_has_child_bounds(obj) for obj in objs)
+        if props.two_object_dim_mode == "CENTER" and not force_bbox_gap:
+            a_min, a_max = object_bbox_min_max(objs[0])
+            b_min, b_max = object_bbox_min_max(objs[1])
+            p1 = (a_min + a_max) * 0.5
+            p2 = (b_min + b_max) * 0.5
             vec = Vector((p2.x - p1.x, p2.y - p1.y, 0.0))
             if vec.length <= 0.0001:
                 self.report({"ERROR"}, "XY 평면에서 두 오브젝트 위치가 같습니다.")
@@ -1375,7 +1394,10 @@ class BL_OT_add_two_object_dimension(bpy.types.Operator):
             self.report({"ERROR"}, "두 오브젝트 간격이 0에 가깝습니다. 축을 바꿔보세요.")
             return {"CANCELLED"}
         add_dimension_xy("BL_DIM_TWO_OBJECTS", p1, p2, offset, props)
-        self.report({"INFO"}, "두 오브젝트 간격 치수선을 생성했습니다.")
+        if force_bbox_gap and props.two_object_dim_mode == "CENTER":
+            self.report({"INFO"}, "부모/자식 컴포넌트가 포함되어 가까운 면 기준으로 치수선을 생성했습니다.")
+        else:
+            self.report({"INFO"}, "두 오브젝트 간격 치수선을 생성했습니다.")
         return {"FINISHED"}
 
 

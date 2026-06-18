@@ -9,6 +9,7 @@
 - Added selected-component dimension hiding for local cleanup when one parent/component's dimensions get crowded.
 - Changed component dimension placement to default to the scene-center side, so dimensions for furniture near a wall tend to stay inside the room instead of outside the wall.
 - Added default replacement for existing component/tag dimensions so repeated test clicks do not silently stack duplicate dimension curves and text.
+- Changed two-object dimensions to use child bbox data for parent Empty objects and to auto-fall back to nearest faces when a parent component is selected.
 - Updated generated sheets to identify v0.10-dev.
 
 ## v0.9-dev
