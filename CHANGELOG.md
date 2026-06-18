@@ -9,6 +9,7 @@
 - Added fast white background mode using transparent PNG output so test renders avoid the slow per-pixel cleanup path.
 - Added Draft and Final render preset buttons.
 - Changed Fine dimension style to recreate the bounding-box dimensions immediately so the visual change is obvious.
+- Changed fast white background mode from transparent PNG to RGB white PNG so standalone image previews do not appear black.
 
 ## v0.7.1
 - Fixed forced white background rendering when the Blender scene world uses nodes.

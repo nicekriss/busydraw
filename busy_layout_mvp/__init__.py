@@ -332,8 +332,8 @@ def apply_drawing_render_settings(scene, props):
     scene.render.resolution_y = int(props.resolution_y)
     force_white = bool(getattr(props, "force_white_background", False))
     fast_white = force_white and bool(getattr(props, "fast_white_background", True))
-    transparent = fast_white or (bool(props.transparent_background) and not force_white)
-    if force_white and not fast_white:
+    transparent = bool(props.transparent_background) and not force_white
+    if force_white:
         scene.render.film_transparent = False
     else:
         scene.render.film_transparent = transparent
@@ -748,7 +748,7 @@ body {{
         Viewport: {props.viewport_width_mm:g}mm x {props.viewport_height_mm:g}mm<br>
         Safe margin: {getattr(props, "real_scale_safe_margin_mm", 0):g}mm<br>
         Model unit: {html.escape(model_unit_display(props))}<br>
-        Drawing background: {"Fast white/transparent PNG" if getattr(props, "force_white_background", False) and getattr(props, "fast_white_background", True) else "Forced white" if getattr(props, "force_white_background", False) else "Scene/transparent"}<br>
+        Drawing background: {"Fast white RGB" if getattr(props, "force_white_background", False) and getattr(props, "fast_white_background", True) else "Forced white" if getattr(props, "force_white_background", False) else "Scene/transparent"}<br>
         브라우저에서 열고 인쇄 &gt; PDF 저장으로 출력하세요. Real Scale 모드는 카메라 Orthographic Scale을 기준으로 한 MVP 축척 기능입니다.
     </p>
 </main>
@@ -779,7 +779,7 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     fast_white_background: bpy.props.BoolProperty(
         name="빠른 흰 배경",
         default=True,
-        description="켜면 느린 PNG 배경 후처리 대신 투명 PNG를 사용합니다. HTML 시트에서는 흰 배경으로 보입니다.",
+        description="켜면 느린 PNG 배경 후처리를 건너뛰고 RGB 흰 배경 PNG로 저장합니다.",
     )
     png_compression: bpy.props.IntProperty(name="PNG 압축", default=6, min=0, max=15)
     use_freestyle: bpy.props.BoolProperty(name="Freestyle 외곽선", default=True)
