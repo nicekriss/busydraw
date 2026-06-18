@@ -331,14 +331,15 @@ def apply_drawing_render_settings(scene, props):
     scene.render.resolution_x = int(props.resolution_x)
     scene.render.resolution_y = int(props.resolution_y)
     force_white = bool(getattr(props, "force_white_background", False))
-    transparent = bool(props.transparent_background) and not force_white
-    if force_white:
+    fast_white = force_white and bool(getattr(props, "fast_white_background", True))
+    transparent = fast_white or (bool(props.transparent_background) and not force_white)
+    if force_white and not fast_white:
         scene.render.film_transparent = False
     else:
         scene.render.film_transparent = transparent
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA" if transparent else "RGB"
-    scene.render.image_settings.compression = 15
+    scene.render.image_settings.compression = int(getattr(props, "png_compression", 6))
 
     for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
         try:
@@ -747,7 +748,7 @@ body {{
         Viewport: {props.viewport_width_mm:g}mm x {props.viewport_height_mm:g}mm<br>
         Safe margin: {getattr(props, "real_scale_safe_margin_mm", 0):g}mm<br>
         Model unit: {html.escape(model_unit_display(props))}<br>
-        Drawing background: {"Forced white" if getattr(props, "force_white_background", False) else "Scene/transparent"}<br>
+        Drawing background: {"Fast white/transparent PNG" if getattr(props, "force_white_background", False) and getattr(props, "fast_white_background", True) else "Forced white" if getattr(props, "force_white_background", False) else "Scene/transparent"}<br>
         브라우저에서 열고 인쇄 &gt; PDF 저장으로 출력하세요. Real Scale 모드는 카메라 Orthographic Scale을 기준으로 한 MVP 축척 기능입니다.
     </p>
 </main>
@@ -775,6 +776,12 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
         default=True,
         description="켜면 렌더 배경을 강제로 흰색으로 만들고 투명 배경보다 우선 적용합니다.",
     )
+    fast_white_background: bpy.props.BoolProperty(
+        name="빠른 흰 배경",
+        default=True,
+        description="켜면 느린 PNG 배경 후처리 대신 투명 PNG를 사용합니다. HTML 시트에서는 흰 배경으로 보입니다.",
+    )
+    png_compression: bpy.props.IntProperty(name="PNG 압축", default=6, min=0, max=15)
     use_freestyle: bpy.props.BoolProperty(name="Freestyle 외곽선", default=True)
     material_override: bpy.props.BoolProperty(name="무광 흰색 재질로 임시 렌더", default=True)
     output_dir: bpy.props.StringProperty(name="출력 폴더", subtype="DIR_PATH", default="//busy_layout_output/")
@@ -982,17 +989,59 @@ class BL_OT_clear_dimensions(bpy.types.Operator):
 
 class BL_OT_apply_fine_dimension_style(bpy.types.Operator):
     bl_idname = "busy_layout.apply_fine_dimension_style"
-    bl_label = "Fine 치수 스타일 적용"
-    bl_description = "현재 모델 단위 기준으로 얇고 덜 투박한 도면용 치수선 값을 적용합니다."
+    bl_label = "Fine 치수선 재생성"
+    bl_description = "얇은 도면용 치수선 값을 적용하고 외곽 치수선을 다시 생성합니다."
 
     def execute(self, context):
         props = context.scene.busy_layout_props
-        props.dim_offset = 0.28
-        props.dim_line_thickness = 0.003
-        props.dim_tick_size = 0.055
-        props.dim_text_size = 0.115
-        props.dim_text_offset = 0.045
-        self.report({"INFO"}, "Fine 치수 스타일을 적용했습니다. 기존 치수선은 삭제 후 다시 생성해야 반영됩니다.")
+        props.dim_offset = 0.42
+        props.dim_line_thickness = 0.0025
+        props.dim_tick_size = 0.05
+        props.dim_text_size = 0.10
+        props.dim_text_offset = 0.08
+
+        objs = drawing_objects(context, props.selected_only)
+        if not objs:
+            self.report({"ERROR"}, "치수선을 만들 오브젝트가 없습니다.")
+            return {"CANCELLED"}
+
+        delete_busy_dimensions()
+        corners = world_bbox_corners(objs)
+        min_v, max_v = bbox_min_max(corners)
+        off = props.dim_offset
+        add_dimension_xy("BL_DIM_BBOX_X", Vector((min_v.x, min_v.y, props.dim_z)), Vector((max_v.x, min_v.y, props.dim_z)), Vector((0, -off, 0)), props)
+        add_dimension_xy("BL_DIM_BBOX_Y", Vector((min_v.x, min_v.y, props.dim_z)), Vector((min_v.x, max_v.y, props.dim_z)), Vector((-off, 0, 0)), props)
+        self.report({"INFO"}, "Fine 스타일로 외곽 치수선을 다시 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_apply_draft_render_preset(bpy.types.Operator):
+    bl_idname = "busy_layout.apply_draft_render_preset"
+    bl_label = "Draft 렌더 프리셋"
+    bl_description = "빠른 테스트용 해상도와 PNG 설정을 적용합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        props.resolution_x = 1280
+        props.resolution_y = 905
+        props.fast_white_background = True
+        props.png_compression = 3
+        self.report({"INFO"}, "Draft 렌더 프리셋을 적용했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_apply_final_render_preset(bpy.types.Operator):
+    bl_idname = "busy_layout.apply_final_render_preset"
+    bl_label = "Final 렌더 프리셋"
+    bl_description = "최종 출력용 A3급 해상도와 PNG 설정을 적용합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        props.resolution_x = 2480
+        props.resolution_y = 1754
+        props.fast_white_background = True
+        props.png_compression = 6
+        self.report({"INFO"}, "Final 렌더 프리셋을 적용했습니다.")
         return {"FINISHED"}
 
 
@@ -1027,7 +1076,7 @@ class BL_OT_render_active(bpy.types.Operator):
             path = out_dir / filename
             scene.render.filepath = str(path)
             bpy.ops.render.render(write_still=True)
-            if getattr(props, "force_white_background", False):
+            if getattr(props, "force_white_background", False) and not getattr(props, "fast_white_background", True):
                 png_force_border_background_white(path)
         finally:
             if cut_mods or cutter:
@@ -1079,7 +1128,7 @@ class BL_OT_render_all(bpy.types.Operator):
                     path = out_dir / filename
                     scene.render.filepath = str(path)
                     bpy.ops.render.render(write_still=True)
-                    if getattr(props, "force_white_background", False):
+                    if getattr(props, "force_white_background", False) and not getattr(props, "fast_white_background", True):
                         png_force_border_background_white(path)
                     image_records.append({
                         "label": spec["label"],
@@ -1132,9 +1181,14 @@ class BL_PT_panel(bpy.types.Panel):
         row.prop(props, "resolution_y")
         box.prop(props, "use_freestyle")
         box.prop(props, "force_white_background")
+        box.prop(props, "fast_white_background")
+        box.prop(props, "png_compression")
         box.prop(props, "material_override")
         box.prop(props, "transparent_background")
         box.prop(props, "output_dir")
+        row = box.row(align=True)
+        row.operator("busy_layout.apply_draft_render_preset", icon="SHADING_RENDERED")
+        row.operator("busy_layout.apply_final_render_preset", icon="RENDER_STILL")
 
         box = layout.box()
         box.label(text="2. 단면 컷")
@@ -1242,6 +1296,8 @@ classes = (
     BL_OT_add_two_object_dimension,
     BL_OT_clear_dimensions,
     BL_OT_apply_fine_dimension_style,
+    BL_OT_apply_draft_render_preset,
+    BL_OT_apply_final_render_preset,
     BL_OT_render_active,
     BL_OT_render_all,
     BL_PT_panel,

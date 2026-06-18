@@ -6,6 +6,9 @@
 - HTML sheet cards can now show per-view scale labels, so ISO can display `Auto Fit` while plan/elevations display `1:50`.
 - Added `Real Scale safe margin mm` so dimension lines and border strokes can breathe without manually changing viewport size.
 - Added a Fine dimension style button for thinner lines, smaller ticks, and less heavy dimension text.
+- Added fast white background mode using transparent PNG output so test renders avoid the slow per-pixel cleanup path.
+- Added Draft and Final render preset buttons.
+- Changed Fine dimension style to recreate the bounding-box dimensions immediately so the visual change is obvious.
 
 ## v0.7.1
 - Fixed forced white background rendering when the Blender scene world uses nodes.
