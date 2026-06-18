@@ -4,7 +4,7 @@ Blender add-on prototype for generating SketchUp LayOut-style drawing sheets fro
 
 ## Current version
 
-v0.7.1
+v0.8-dev
 
 ## Features
 
@@ -21,6 +21,7 @@ v0.7.1
 - Meter and millimeter model unit options
 - Adjustable viewport width/height in millimeters for scale calculation
 - v0.7.1 fixes forced white render background handling when an existing Blender world uses nodes
+- v0.8-dev adds output PNG background cleanup and keeps ISO on Auto Fit by default during Real Scale rendering
 
 ## Install
 

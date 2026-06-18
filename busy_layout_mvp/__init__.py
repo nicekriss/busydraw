@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Busy Layout MVP",
     "author": "ChatGPT for 너무바쁜베짱이",
-    "version": (0, 7, 1),
+    "version": (0, 8, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Busy Layout",
     "description": "SketchUp LayOut-style MVP for Blender: orthographic cameras, real scale presets, section-cut plan render, simple dimensions, sheets, and HTML/PDF-ready output.",
@@ -10,7 +10,10 @@ bl_info = {
 
 import bpy
 import html
+import struct
+import zlib
 from pathlib import Path
+from collections import deque
 from mathutils import Vector
 from datetime import date
 
@@ -122,6 +125,133 @@ def fit_orthographic_camera(camera, corners, margin=1.12, res_x=2480, res_y=1754
     camera.data.ortho_scale = max(ortho_scale, 0.001)
 
 
+def png_force_border_background_white(path, tolerance=10):
+    path = Path(path)
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return False
+
+    pos = 8
+    width = height = color_type = None
+    chunks = []
+    idat = b""
+    while pos < len(data):
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        chunk_type = data[pos + 4:pos + 8]
+        chunk_data = data[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if chunk_type == b"IHDR":
+            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", chunk_data)
+            if bit_depth != 8 or compression != 0 or filter_method != 0 or interlace != 0 or color_type not in {2, 6}:
+                return False
+        elif chunk_type == b"IDAT":
+            idat += chunk_data
+            continue
+        chunks.append((chunk_type, chunk_data))
+
+    channels = 4 if color_type == 6 else 3
+    stride = width * channels
+    raw = zlib.decompress(idat)
+    rows = []
+    index = 0
+    previous = bytearray(stride)
+
+    for _ in range(height):
+        filter_type = raw[index]
+        index += 1
+        scan = bytearray(raw[index:index + stride])
+        index += stride
+        recon = bytearray(stride)
+        for i, value in enumerate(scan):
+            left = recon[i - channels] if i >= channels else 0
+            up = previous[i]
+            upper_left = previous[i - channels] if i >= channels else 0
+            if filter_type == 0:
+                recon[i] = value
+            elif filter_type == 1:
+                recon[i] = (value + left) & 255
+            elif filter_type == 2:
+                recon[i] = (value + up) & 255
+            elif filter_type == 3:
+                recon[i] = (value + ((left + up) // 2)) & 255
+            elif filter_type == 4:
+                predictor = left + up - upper_left
+                pa = abs(predictor - left)
+                pb = abs(predictor - up)
+                pc = abs(predictor - upper_left)
+                predict = left if pa <= pb and pa <= pc else up if pb <= pc else upper_left
+                recon[i] = (value + predict) & 255
+            else:
+                return False
+        rows.append(recon)
+        previous = recon
+
+    def rgb_at(x, y):
+        offset = x * channels
+        return tuple(rows[y][offset:offset + 3])
+
+    samples = [
+        rgb_at(0, 0),
+        rgb_at(width - 1, 0),
+        rgb_at(0, height - 1),
+        rgb_at(width - 1, height - 1),
+    ]
+    background = tuple(sorted(channel_values)[len(channel_values) // 2] for channel_values in zip(*samples))
+
+    def is_background(x, y):
+        pixel = rgb_at(x, y)
+        return all(abs(pixel[i] - background[i]) <= tolerance for i in range(3))
+
+    visited = set()
+    queue = deque()
+    for x in range(width):
+        queue.append((x, 0))
+        queue.append((x, height - 1))
+    for y in range(height):
+        queue.append((0, y))
+        queue.append((width - 1, y))
+
+    while queue:
+        x, y = queue.popleft()
+        if x < 0 or y < 0 or x >= width or y >= height or (x, y) in visited:
+            continue
+        if not is_background(x, y):
+            continue
+        visited.add((x, y))
+        offset = x * channels
+        rows[y][offset:offset + 3] = b"\xff\xff\xff"
+        if channels == 4:
+            rows[y][offset + 3] = 255
+        queue.extend(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
+
+    if not visited:
+        return False
+
+    filtered = bytearray()
+    for row in rows:
+        filtered.append(0)
+        filtered.extend(row)
+
+    new_chunks = []
+    wrote_idat = False
+    for chunk_type, chunk_data in chunks:
+        if chunk_type == b"IDAT":
+            continue
+        if chunk_type == b"IEND" and not wrote_idat:
+            new_chunks.append((b"IDAT", zlib.compress(bytes(filtered), 9)))
+            wrote_idat = True
+        new_chunks.append((chunk_type, chunk_data))
+
+    out = bytearray(data[:8])
+    for chunk_type, chunk_data in new_chunks:
+        out.extend(struct.pack(">I", len(chunk_data)))
+        out.extend(chunk_type)
+        out.extend(chunk_data)
+        out.extend(struct.pack(">I", zlib.crc32(chunk_type + chunk_data) & 0xffffffff))
+    path.write_bytes(out)
+    return True
+
+
 def scale_denominator(props):
     if props.scale_preset == "CUSTOM":
         return max(float(props.custom_scale_denominator), 0.001)
@@ -145,6 +275,12 @@ def scale_display_label(props):
     return label
 
 
+def view_scale_display_label(props, view_key):
+    if props.scale_mode == "REAL_SCALE" and view_key == "ISO_VIEW" and props.real_scale_iso_auto_fit:
+        return "Auto Fit"
+    return scale_display_label(props)
+
+
 def model_unit_display(props):
     return "meter" if props.model_unit == "METER" else "millimeter"
 
@@ -166,11 +302,11 @@ def real_scale_ortho_scale(props, res_x=2480, res_y=1754):
 
 
 def set_camera_ortho_scale(camera, corners, props):
-    if props.scale_mode == "REAL_SCALE":
+    view_key = camera.get("busy_layout_view", "")
+    if props.scale_mode == "REAL_SCALE" and not (view_key == "ISO_VIEW" and props.real_scale_iso_auto_fit):
         camera.data.ortho_scale = real_scale_ortho_scale(props, props.resolution_x, props.resolution_y)
         return
 
-    view_key = camera.get("busy_layout_view", "")
     zoom_prop = ""
     for spec in VIEW_SPECS:
         if spec["key"] == view_key:
@@ -519,11 +655,12 @@ def write_html_sheet(output_dir, props, image_records):
         label = html.escape(rec["label"])
         filename = html.escape(Path(rec["path"]).name)
         badge_html = "<em>CUT</em>" if rec.get("cut") else ""
+        card_scale_label = html.escape(rec.get("scale_label", scale_label))
         cards.append(f'''
         <section class="view-card">
             <div class="view-head">
                 <h2>{label} {badge_html}</h2>
-                <span>Scale: {scale_label}</span>
+                <span>Scale: {card_scale_label}</span>
             </div>
             <img src="{filename}" alt="{label}">
         </section>
@@ -585,7 +722,7 @@ body {{
     <header class="title-block">
         <div>
             <h1>{title}</h1>
-            <div class="subtitle">Generated by Blender Busy Layout MVP v0.7.1</div>
+            <div class="subtitle">Generated by Blender Busy Layout MVP v0.8-dev</div>
         </div>
         <table class="meta-table">
             <tr><th>Client</th><td>{client}</td></tr>
@@ -676,6 +813,11 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
         min=0.001,
         max=10.0,
         description="1.0이면 선택 축척 그대로입니다. 1.1은 10% 넓게 보이지만 실제 축척 표기는 adjusted로 표시됩니다.",
+    )
+    real_scale_iso_auto_fit: bpy.props.BoolProperty(
+        name="ISO는 Auto Fit 유지",
+        default=True,
+        description="켜면 Real Scale 모드에서도 ISO 뷰는 실제 축척 대신 기존 Auto Fit 카메라 맞춤을 사용합니다.",
     )
 
     use_section_cut: bpy.props.BoolProperty(name="단면 컷 사용", default=False, description="렌더 중에 임시 Boolean 컷을 적용합니다. 원본 모델에는 적용하지 않고 렌더 후 제거합니다.")
@@ -856,6 +998,8 @@ class BL_OT_render_active(bpy.types.Operator):
             path = out_dir / filename
             scene.render.filepath = str(path)
             bpy.ops.render.render(write_still=True)
+            if getattr(props, "force_white_background", False):
+                png_force_border_background_white(path)
         finally:
             if cut_mods or cutter:
                 remove_section_cut(cut_mods, cutter)
@@ -906,7 +1050,14 @@ class BL_OT_render_all(bpy.types.Operator):
                     path = out_dir / filename
                     scene.render.filepath = str(path)
                     bpy.ops.render.render(write_still=True)
-                    image_records.append({"label": spec["label"], "path": str(path), "cut": bool(cut_applied)})
+                    if getattr(props, "force_white_background", False):
+                        png_force_border_background_white(path)
+                    image_records.append({
+                        "label": spec["label"],
+                        "path": str(path),
+                        "cut": bool(cut_applied),
+                        "scale_label": view_scale_display_label(props, spec["key"]),
+                    })
                 finally:
                     if cut_mods or cutter:
                         remove_section_cut(cut_mods, cutter)
@@ -1011,6 +1162,7 @@ class BL_PT_panel(bpy.types.Panel):
             row.prop(props, "viewport_width_mm")
             row.prop(props, "viewport_height_mm")
             box.prop(props, "real_scale_margin_factor")
+            box.prop(props, "real_scale_iso_auto_fit")
             box.label(text=f"현재 표기: Scale: {scale_display_label(props)}")
         else:
             box.label(text="현재 표기: Scale: Auto Fit")
