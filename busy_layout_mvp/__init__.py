@@ -1152,6 +1152,21 @@ class BL_OT_render_all(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BL_OT_dev_reload_scripts(bpy.types.Operator):
+    bl_idname = "busy_layout.dev_reload_scripts"
+    bl_label = "Dev Reload Scripts"
+    bl_description = "개발 중 Blender를 재시작하지 않고 Python 스크립트와 애드온을 다시 로드합니다."
+
+    def execute(self, context):
+        try:
+            bpy.ops.script.reload()
+        except Exception as exc:
+            self.report({"ERROR"}, f"Reload Scripts 실패: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Blender scripts reloaded.")
+        return {"FINISHED"}
+
+
 class BL_PT_panel(bpy.types.Panel):
     bl_label = "Busy Layout MVP"
     bl_idname = "BL_PT_busy_layout_panel"
@@ -1287,6 +1302,9 @@ class BL_PT_panel(bpy.types.Panel):
         layout.operator("busy_layout.render_active", icon="RENDER_STILL")
         layout.operator("busy_layout.render_all", icon="OUTPUT")
 
+        layout.separator()
+        layout.operator("busy_layout.dev_reload_scripts", icon="FILE_REFRESH")
+
 
 classes = (
     BL_Layout_Props,
@@ -1300,6 +1318,7 @@ classes = (
     BL_OT_apply_final_render_preset,
     BL_OT_render_active,
     BL_OT_render_all,
+    BL_OT_dev_reload_scripts,
     BL_PT_panel,
 )
 

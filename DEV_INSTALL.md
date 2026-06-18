@@ -22,9 +22,11 @@ busy_layout_mvp_v07.py.disabled-backup
 ## Daily Test Loop
 
 1. Pull or receive the latest repository changes.
-2. Restart Blender.
-3. In `Edit > Preferences > Add-ons`, enable `Busy Layout MVP` with module name `busy_layout_mvp`.
+2. In Blender, run `F3 > Reload Scripts`.
+3. If Busy Layout is not enabled yet, use `Edit > Preferences > Add-ons` and enable `Busy Layout MVP` with module name `busy_layout_mvp`.
 4. Test from the `N` sidebar > `Busy Layout`.
+
+After the dev reload button is visible in the Busy Layout panel, you can usually press `Dev Reload Scripts` instead of using `F3`.
 
 No delete/reinstall cycle is needed while this link is active.
 
