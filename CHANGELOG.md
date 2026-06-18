@@ -7,6 +7,7 @@
 - Added active-parent component dimensions: total parent outer dimensions plus smaller child-component internal dimensions along the parent's main axis.
 - Added tag dimension visibility controls to hide, show, or delete only the dimensions belonging to the active tag.
 - Added selected-component dimension hiding for local cleanup when one parent/component's dimensions get crowded.
+- Changed component dimension placement to default to the scene-center side, so dimensions for furniture near a wall tend to stay inside the room instead of outside the wall.
 - Updated generated sheets to identify v0.10-dev.
 
 ## v0.9-dev

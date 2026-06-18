@@ -760,6 +760,58 @@ def add_bbox_dimensions_for_bounds(name, min_v, max_v, props, offset=None, dim_t
     return created
 
 
+def dimension_side(side_prop, min_value, max_value, scene_center_value):
+    if side_prop == "POS":
+        return 1.0
+    if side_prop == "NEG":
+        return -1.0
+    component_center = (min_value + max_value) * 0.5
+    return 1.0 if scene_center_value >= component_center else -1.0
+
+
+def add_component_bbox_dimensions_for_bounds(
+    name,
+    min_v,
+    max_v,
+    props,
+    scene_center,
+    offset=None,
+    dim_tag="",
+    dim_source="",
+    dim_group="",
+    include_y=True,
+):
+    off = props.dim_offset if offset is None else offset
+    z = props.dim_z
+    x_side = dimension_side(props.component_dim_x_side, min_v.y, max_v.y, scene_center.y)
+    y_side = dimension_side(props.component_dim_y_side, min_v.x, max_v.x, scene_center.x)
+    x_y = max_v.y if x_side > 0 else min_v.y
+    y_x = max_v.x if y_side > 0 else min_v.x
+    created = []
+    created.extend(add_dimension_xy(
+        name + "_X",
+        Vector((min_v.x, x_y, z)),
+        Vector((max_v.x, x_y, z)),
+        Vector((0, off * x_side, 0)),
+        props,
+        dim_tag=dim_tag,
+        dim_source=dim_source,
+        dim_group=dim_group,
+    ))
+    if include_y:
+        created.extend(add_dimension_xy(
+            name + "_Y",
+            Vector((y_x, min_v.y, z)),
+            Vector((y_x, max_v.y, z)),
+            Vector((off * y_side, 0, 0)),
+            props,
+            dim_tag=dim_tag,
+            dim_source=dim_source,
+            dim_group=dim_group,
+        ))
+    return created
+
+
 def add_component_axis_dimension(name, min_v, max_v, props, axis, offset, dim_tag="", dim_source="", dim_group=""):
     z = props.dim_z
     if axis == "Y":
@@ -1134,6 +1186,24 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     component_dim_include_y: bpy.props.BoolProperty(name="컴포넌트 세로도 생성", default=True)
     component_dim_internal: bpy.props.BoolProperty(name="부모 내부 자식 치수 생성", default=True)
     component_dim_internal_offset: bpy.props.FloatProperty(name="내부 치수선 거리", default=0.16, min=0.001, max=10.0)
+    component_dim_x_side: bpy.props.EnumProperty(
+        name="컴포넌트 가로 치수 방향",
+        items=[
+            ("AUTO", "Auto", "전체 모델 중심 쪽으로 치수선을 배치합니다."),
+            ("NEG", "-Y", "가로 치수선을 -Y 방향으로 배치합니다."),
+            ("POS", "+Y", "가로 치수선을 +Y 방향으로 배치합니다."),
+        ],
+        default="AUTO",
+    )
+    component_dim_y_side: bpy.props.EnumProperty(
+        name="컴포넌트 세로 치수 방향",
+        items=[
+            ("AUTO", "Auto", "전체 모델 중심 쪽으로 치수선을 배치합니다."),
+            ("NEG", "-X", "세로 치수선을 -X 방향으로 배치합니다."),
+            ("POS", "+X", "세로 치수선을 +X 방향으로 배치합니다."),
+        ],
+        default="AUTO",
+    )
     two_object_dim_mode: bpy.props.EnumProperty(
         name="두 오브젝트 치수 기준",
         items=[
@@ -1361,6 +1431,8 @@ class BL_OT_add_selected_component_dimensions(bpy.types.Operator):
             self.report({"ERROR"}, "치수선을 만들 선택 컴포넌트가 없습니다.")
             return {"CANCELLED"}
 
+        scene_min, scene_max = objects_bbox_min_max(drawing_objects(context, False))
+        scene_center = (scene_min + scene_max) * 0.5
         created = 0
         for index, obj in enumerate(targets):
             min_v, max_v = object_bbox_min_max(obj)
@@ -1368,11 +1440,12 @@ class BL_OT_add_selected_component_dimensions(bpy.types.Operator):
                 continue
             tag = object_busy_tag(obj) or busy_tag_from_props(props)
             group = f"{tag}:{obj.name}"
-            created += len(add_bbox_dimensions_for_bounds(
+            created += len(add_component_bbox_dimensions_for_bounds(
                 f"BL_DIM_COMPONENT_{safe_filename(obj.name)}",
                 min_v,
                 max_v,
                 props,
+                scene_center,
                 offset=props.dim_offset + props.component_dim_internal_offset * index,
                 dim_tag=tag,
                 dim_source=obj.name,
@@ -1397,15 +1470,18 @@ class BL_OT_add_tag_component_dimensions(bpy.types.Operator):
             self.report({"ERROR"}, f"'{tag}' 태그가 붙은 최상위 컴포넌트가 없습니다.")
             return {"CANCELLED"}
 
+        scene_min, scene_max = objects_bbox_min_max(drawing_objects(context, False))
+        scene_center = (scene_min + scene_max) * 0.5
         created = 0
         for index, obj in enumerate(targets):
             min_v, max_v = object_bbox_min_max(obj)
             group = f"{tag}:{obj.name}"
-            created += len(add_bbox_dimensions_for_bounds(
+            created += len(add_component_bbox_dimensions_for_bounds(
                 f"BL_DIM_TAG_{tag}_{safe_filename(obj.name)}",
                 min_v,
                 max_v,
                 props,
+                scene_center,
                 offset=props.dim_offset + props.component_dim_internal_offset * index,
                 dim_tag=tag,
                 dim_source=obj.name,
@@ -1866,6 +1942,9 @@ class BL_PT_panel(bpy.types.Panel):
             row.prop(props, "component_dim_include_y")
             row.prop(props, "component_dim_internal")
             box.prop(props, "component_dim_internal_offset")
+            row = box.row(align=True)
+            row.prop(props, "component_dim_x_side")
+            row.prop(props, "component_dim_y_side")
             row = box.row(align=True)
             row.prop(props, "two_object_dim_mode")
             row.prop(props, "two_object_dim_axis")
