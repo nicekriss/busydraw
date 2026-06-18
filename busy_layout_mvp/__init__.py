@@ -80,6 +80,14 @@ def bbox_min_max(corners):
 
 
 def object_bbox_min_max(obj):
+    child_meshes = [
+        child
+        for child in obj.children_recursive
+        if child.visible_get() and not child.name.startswith("BL_") and hasattr(child, "bound_box")
+    ]
+    if child_meshes:
+        return objects_bbox_min_max(child_meshes)
+
     try:
         return bbox_min_max([obj.matrix_world @ Vector(c) for c in obj.bound_box])
     except Exception:
@@ -1117,8 +1125,8 @@ class BL_OT_add_two_object_dimension(bpy.types.Operator):
 
 class BL_OT_add_group_to_active_dimension(bpy.types.Operator):
     bl_idname = "busy_layout.add_group_to_active_dimension"
-    bl_label = "선택 그룹 ↔ 활성 간격 치수선"
-    bl_description = "활성 오브젝트를 기준 대상으로 보고, 나머지 선택 오브젝트들을 하나의 그룹 bbox로 묶어 간격 치수선을 생성합니다."
+    bl_label = "선택 그룹/부모 ↔ 활성 간격 치수선"
+    bl_description = "활성 오브젝트를 기준 대상으로 보고, 나머지 선택 오브젝트와 자식 메시들을 하나의 그룹 bbox로 묶어 간격 치수선을 생성합니다."
 
     def execute(self, context):
         props = context.scene.busy_layout_props

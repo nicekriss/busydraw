@@ -9,6 +9,7 @@
 - Changed two-object dimensions to default to nearest bounding-box faces instead of object origins, with Auto/X/Y axis controls.
 - Converted the numbered Busy Layout panel sections into foldouts so the growing option set stays manageable.
 - Added group-to-active dimensions for multi-part assets: select all furniture parts, select the wall last, then dimension the furniture group's bbox to the active object.
+- Parent/Empty objects now use their visible child meshes for bbox dimension calculations, so a BlenderKit parent can be selected as one component.
 
 ## v0.8-dev
 - Added PNG border-background post-processing so forced white background is reliable even when Blender renders a gray world/background.
