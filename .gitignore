@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.zip
+busy_layout_output/
+.DS_Store
