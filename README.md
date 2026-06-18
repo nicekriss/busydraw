@@ -4,7 +4,7 @@ Blender add-on prototype for generating SketchUp LayOut-style drawing sheets fro
 
 ## Current version
 
-v0.9-dev
+v0.10-dev
 
 ## Features
 
@@ -23,6 +23,7 @@ v0.9-dev
 - v0.7.1 fixes forced white render background handling when an existing Blender world uses nodes
 - v0.8-dev adds output PNG background cleanup and keeps ISO on Auto Fit by default during Real Scale rendering
 - v0.9-dev adds view presets, quick test rendering, and one-click sheet/output folder opening
+- v0.10-dev adds SketchUp-like Busy tags and parent/component bbox dimension helpers
 
 ## Install
 
@@ -45,5 +46,5 @@ The v0.7 scale feature is an MVP control for Blender orthographic views, not a c
 
 ## Roadmap
 
-- v0.10: sheet viewport layout controls
+- v0.11: sheet viewport layout controls
 - v1.0: title block templates and collection-based line styles

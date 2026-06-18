@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Busy Layout MVP",
     "author": "ChatGPT for 너무바쁜베짱이",
-    "version": (0, 9, 0),
+    "version": (0, 10, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Busy Layout",
     "description": "SketchUp LayOut-style MVP for Blender: orthographic cameras, real scale presets, section-cut plan render, simple dimensions, sheets, and HTML/PDF-ready output.",
@@ -107,6 +107,52 @@ def objects_bbox_min_max(objs):
             except Exception:
                 continue
     return bbox_min_max(corners)
+
+
+def busy_tag_from_props(props):
+    if props.busy_tag_preset == "CUSTOM":
+        tag = props.busy_custom_tag.strip()
+    else:
+        tag = props.busy_tag_preset.lower()
+    return safe_filename(tag or "custom").lower()
+
+
+def object_busy_tag(obj):
+    current = obj
+    while current:
+        tag = current.get("busy_layout_tag", "")
+        if tag:
+            return str(tag)
+        current = current.parent
+    return ""
+
+
+def parent_has_busy_tag(obj, tag):
+    current = obj.parent
+    while current:
+        if str(current.get("busy_layout_tag", "")) == tag:
+            return True
+        current = current.parent
+    return False
+
+
+def component_candidates_for_tag(context, tag):
+    candidates = []
+    for obj in context.scene.objects:
+        if not obj.visible_get() or obj.name.startswith("BL_"):
+            continue
+        if str(obj.get("busy_layout_tag", "")) != tag:
+            continue
+        if parent_has_busy_tag(obj, tag):
+            continue
+        try:
+            min_v, max_v = object_bbox_min_max(obj)
+        except Exception:
+            continue
+        if (max_v - min_v).length <= 0.0001:
+            continue
+        candidates.append(obj)
+    return candidates
 
 
 def bbox_center_and_diag(corners):
@@ -636,7 +682,18 @@ def create_dim_text(name, text, location, size, material, rotation_z=0.0):
     return obj
 
 
-def add_dimension_xy(name, p1, p2, offset_vec, props, label_override=""):
+def tag_dimension_objects(objs, dim_tag="", dim_source="", dim_group=""):
+    for obj in objs:
+        obj["busy_layout_dimension"] = True
+        if dim_tag:
+            obj["busy_layout_dim_tag"] = dim_tag
+        if dim_source:
+            obj["busy_layout_dim_source"] = dim_source
+        if dim_group:
+            obj["busy_layout_dim_group"] = dim_group
+
+
+def add_dimension_xy(name, p1, p2, offset_vec, props, label_override="", dim_tag="", dim_source="", dim_group=""):
     mat = get_or_create_dimension_material()
     z = props.dim_z
     p1 = Vector((p1.x, p1.y, z))
@@ -671,7 +728,61 @@ def add_dimension_xy(name, p1, p2, offset_vec, props, label_override=""):
     if abs(dir_n.y) > abs(dir_n.x):
         rot = 1.57079632679
     objs.append(create_dim_text(name + "_TEXT", label, mid + text_offset, props.dim_text_size, mat, rot))
+    tag_dimension_objects(objs, dim_tag, dim_source, dim_group)
     return objs
+
+
+def add_bbox_dimensions_for_bounds(name, min_v, max_v, props, offset=None, dim_tag="", dim_source="", dim_group="", include_y=True):
+    off = props.dim_offset if offset is None else offset
+    z = props.dim_z
+    created = []
+    created.extend(add_dimension_xy(
+        name + "_X",
+        Vector((min_v.x, min_v.y, z)),
+        Vector((max_v.x, min_v.y, z)),
+        Vector((0, -off, 0)),
+        props,
+        dim_tag=dim_tag,
+        dim_source=dim_source,
+        dim_group=dim_group,
+    ))
+    if include_y:
+        created.extend(add_dimension_xy(
+            name + "_Y",
+            Vector((min_v.x, min_v.y, z)),
+            Vector((min_v.x, max_v.y, z)),
+            Vector((-off, 0, 0)),
+            props,
+            dim_tag=dim_tag,
+            dim_source=dim_source,
+            dim_group=dim_group,
+        ))
+    return created
+
+
+def add_component_axis_dimension(name, min_v, max_v, props, axis, offset, dim_tag="", dim_source="", dim_group=""):
+    z = props.dim_z
+    if axis == "Y":
+        return add_dimension_xy(
+            name + "_Y",
+            Vector((min_v.x, min_v.y, z)),
+            Vector((min_v.x, max_v.y, z)),
+            Vector((-offset, 0, 0)),
+            props,
+            dim_tag=dim_tag,
+            dim_source=dim_source,
+            dim_group=dim_group,
+        )
+    return add_dimension_xy(
+        name + "_X",
+        Vector((min_v.x, min_v.y, z)),
+        Vector((max_v.x, min_v.y, z)),
+        Vector((0, -offset, 0)),
+        props,
+        dim_tag=dim_tag,
+        dim_source=dim_source,
+        dim_group=dim_group,
+    )
 
 
 def overlap_mid(a_min, a_max, b_min, b_max):
@@ -740,6 +851,40 @@ def delete_busy_dimensions():
             except Exception:
                 pass
             count += 1
+    return count
+
+
+def set_busy_dimensions_hidden(hidden, dim_tag="", sources=None):
+    sources = set(sources or [])
+    count = 0
+    for obj in bpy.data.objects:
+        if not obj.get("busy_layout_dimension"):
+            continue
+        if dim_tag and str(obj.get("busy_layout_dim_tag", "")) != dim_tag:
+            continue
+        if sources and str(obj.get("busy_layout_dim_source", "")) not in sources:
+            continue
+        obj.hide_viewport = hidden
+        obj.hide_render = hidden
+        count += 1
+    return count
+
+
+def delete_busy_dimensions_by_tag(dim_tag):
+    count = 0
+    for obj in list(bpy.data.objects):
+        if not obj.get("busy_layout_dimension"):
+            continue
+        if str(obj.get("busy_layout_dim_tag", "")) != dim_tag:
+            continue
+        data = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        try:
+            if data and data.users == 0 and data.__class__.__name__ == "Curve":
+                bpy.data.curves.remove(data)
+        except Exception:
+            pass
+        count += 1
     return count
 
 
@@ -836,7 +981,7 @@ body {{
     <header class="title-block">
         <div>
             <h1>{title}</h1>
-            <div class="subtitle">Generated by Blender Busy Layout MVP v0.9-dev</div>
+            <div class="subtitle">Generated by Blender Busy Layout MVP v0.10-dev</div>
         </div>
         <table class="meta-table">
             <tr><th>Client</th><td>{client}</td></tr>
@@ -972,6 +1117,23 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     dim_unit_scale: bpy.props.FloatProperty(name="치수 배율", default=1000.0, description="미터 모델에서 mm로 표기하려면 1000. 밀리미터 모델이면 1.")
     dim_suffix: bpy.props.StringProperty(name="치수 접미사", default="")
     dim_decimals: bpy.props.IntProperty(name="소수점", default=0, min=0, max=4)
+    busy_tag_preset: bpy.props.EnumProperty(
+        name="태그",
+        items=[
+            ("FURNITURE", "furniture", "가구/집기 컴포넌트"),
+            ("WALL", "wall", "벽체"),
+            ("WINDOW", "window", "창문"),
+            ("DOOR", "door", "문"),
+            ("FIXTURE", "fixture", "고정 설비"),
+            ("CUSTOM", "custom", "직접 입력"),
+        ],
+        default="FURNITURE",
+    )
+    busy_custom_tag: bpy.props.StringProperty(name="사용자 태그", default="furniture")
+    busy_tag_apply_children: bpy.props.BoolProperty(name="자식에도 태그 적용", default=False)
+    component_dim_include_y: bpy.props.BoolProperty(name="컴포넌트 세로도 생성", default=True)
+    component_dim_internal: bpy.props.BoolProperty(name="부모 내부 자식 치수 생성", default=True)
+    component_dim_internal_offset: bpy.props.FloatProperty(name="내부 치수선 거리", default=0.16, min=0.001, max=10.0)
     two_object_dim_mode: bpy.props.EnumProperty(
         name="두 오브젝트 치수 기준",
         items=[
@@ -1001,7 +1163,7 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     drawing_no: bpy.props.StringProperty(name="도면 번호", default="A-001")
     sheet_date: bpy.props.StringProperty(name="날짜", default="", description="비워두면 오늘 날짜가 자동 입력됩니다.")
     scale_label: bpy.props.StringProperty(name="축척 표기", default="Auto Fit")
-    sheet_note: bpy.props.StringProperty(name="비고", default="v0.9-dev: 실제 축척은 Orthographic Scale 기반 MVP 기능입니다. adjusted 표기는 safe margin 또는 margin factor가 적용된 뷰입니다.")
+    sheet_note: bpy.props.StringProperty(name="비고", default="v0.10-dev: 태그/부모 컴포넌트 치수는 parent Empty의 자식 bbox를 기준으로 생성됩니다.")
 
     paper_size: bpy.props.EnumProperty(name="용지", items=[("A4", "A4", ""), ("A3", "A3", ""), ("A2", "A2", "")], default="A3")
     orientation: bpy.props.EnumProperty(name="방향", items=[("LANDSCAPE", "가로", ""), ("PORTRAIT", "세로", "")], default="LANDSCAPE")
@@ -1157,6 +1319,204 @@ class BL_OT_add_group_to_active_dimension(bpy.types.Operator):
 
         add_dimension_xy("BL_DIM_GROUP_TO_ACTIVE", p1, p2, offset, props)
         self.report({"INFO"}, "선택 그룹과 활성 오브젝트 사이 간격 치수선을 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_assign_busy_tag(bpy.types.Operator):
+    bl_idname = "busy_layout.assign_busy_tag"
+    bl_label = "선택 오브젝트에 태그 붙이기"
+    bl_description = "선택한 부모/오브젝트에 Busy Layout 태그를 붙입니다. BlenderKit parent Empty를 컴포넌트처럼 관리할 때 사용합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        tag = busy_tag_from_props(props)
+        targets = [o for o in context.selected_objects if o.visible_get() and not o.name.startswith("BL_")]
+        if not targets:
+            self.report({"ERROR"}, "태그를 붙일 선택 오브젝트가 없습니다.")
+            return {"CANCELLED"}
+
+        count = 0
+        for obj in targets:
+            obj["busy_layout_tag"] = tag
+            count += 1
+            if props.busy_tag_apply_children:
+                for child in obj.children_recursive:
+                    if child.name.startswith("BL_"):
+                        continue
+                    child["busy_layout_tag"] = tag
+                    count += 1
+        self.report({"INFO"}, f"'{tag}' 태그를 {count}개 오브젝트에 붙였습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_add_selected_component_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.add_selected_component_dimensions"
+    bl_label = "선택 컴포넌트 외곽 치수"
+    bl_description = "선택한 부모/오브젝트마다 자식 bbox를 포함한 외곽 치수를 생성합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        targets = [o for o in context.selected_objects if o.visible_get() and not o.name.startswith("BL_")]
+        if not targets:
+            self.report({"ERROR"}, "치수선을 만들 선택 컴포넌트가 없습니다.")
+            return {"CANCELLED"}
+
+        created = 0
+        for index, obj in enumerate(targets):
+            min_v, max_v = object_bbox_min_max(obj)
+            if (max_v - min_v).length <= 0.0001:
+                continue
+            tag = object_busy_tag(obj) or busy_tag_from_props(props)
+            group = f"{tag}:{obj.name}"
+            created += len(add_bbox_dimensions_for_bounds(
+                f"BL_DIM_COMPONENT_{safe_filename(obj.name)}",
+                min_v,
+                max_v,
+                props,
+                offset=props.dim_offset + props.component_dim_internal_offset * index,
+                dim_tag=tag,
+                dim_source=obj.name,
+                dim_group=group,
+                include_y=props.component_dim_include_y,
+            ))
+
+        self.report({"INFO"}, f"선택 컴포넌트 치수 오브젝트 {created}개를 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_add_tag_component_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.add_tag_component_dimensions"
+    bl_label = "태그 컴포넌트 치수"
+    bl_description = "현재 태그가 붙은 최상위 컴포넌트마다 외곽 치수를 생성합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        tag = busy_tag_from_props(props)
+        targets = component_candidates_for_tag(context, tag)
+        if not targets:
+            self.report({"ERROR"}, f"'{tag}' 태그가 붙은 최상위 컴포넌트가 없습니다.")
+            return {"CANCELLED"}
+
+        created = 0
+        for index, obj in enumerate(targets):
+            min_v, max_v = object_bbox_min_max(obj)
+            group = f"{tag}:{obj.name}"
+            created += len(add_bbox_dimensions_for_bounds(
+                f"BL_DIM_TAG_{tag}_{safe_filename(obj.name)}",
+                min_v,
+                max_v,
+                props,
+                offset=props.dim_offset + props.component_dim_internal_offset * index,
+                dim_tag=tag,
+                dim_source=obj.name,
+                dim_group=group,
+                include_y=props.component_dim_include_y,
+            ))
+
+        self.report({"INFO"}, f"'{tag}' 태그 컴포넌트 {len(targets)}개의 치수를 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_add_active_parent_component_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.add_active_parent_component_dimensions"
+    bl_label = "활성 부모: 총 외곽 + 내부 치수"
+    bl_description = "활성 부모의 전체 외곽 치수와 바로 아래 자식 컴포넌트들의 내부 치수를 같이 생성합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        active = context.view_layer.objects.active
+        if not active or active.name.startswith("BL_"):
+            self.report({"ERROR"}, "활성 부모 오브젝트가 필요합니다.")
+            return {"CANCELLED"}
+
+        tag = object_busy_tag(active) or busy_tag_from_props(props)
+        min_v, max_v = object_bbox_min_max(active)
+        created = len(add_bbox_dimensions_for_bounds(
+            f"BL_DIM_PARENT_TOTAL_{safe_filename(active.name)}",
+            min_v,
+            max_v,
+            props,
+            offset=props.dim_offset,
+            dim_tag=tag,
+            dim_source=active.name,
+            dim_group=f"{tag}:{active.name}:total",
+            include_y=True,
+        ))
+
+        if props.component_dim_internal:
+            children = [
+                child for child in active.children
+                if child.visible_get() and not child.name.startswith("BL_")
+            ]
+            axis = "X" if (max_v.x - min_v.x) >= (max_v.y - min_v.y) else "Y"
+            for child in children:
+                child_min, child_max = object_bbox_min_max(child)
+                if (child_max - child_min).length <= 0.0001:
+                    continue
+                created += len(add_component_axis_dimension(
+                    f"BL_DIM_PARENT_PART_{safe_filename(child.name)}",
+                    child_min,
+                    child_max,
+                    props,
+                    axis,
+                    props.component_dim_internal_offset,
+                    dim_tag=tag,
+                    dim_source=child.name,
+                    dim_group=f"{tag}:{active.name}:internal",
+                ))
+
+        self.report({"INFO"}, f"활성 부모 컴포넌트 치수 오브젝트 {created}개를 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_hide_tag_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.hide_tag_dimensions"
+    bl_label = "태그 치수 숨김"
+    bl_description = "현재 태그로 만든 치수선을 뷰포트/렌더에서 숨깁니다."
+
+    def execute(self, context):
+        tag = busy_tag_from_props(context.scene.busy_layout_props)
+        count = set_busy_dimensions_hidden(True, dim_tag=tag)
+        self.report({"INFO"}, f"'{tag}' 치수 오브젝트 {count}개를 숨겼습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_show_tag_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.show_tag_dimensions"
+    bl_label = "태그 치수 표시"
+    bl_description = "현재 태그로 만든 치수선을 다시 표시합니다."
+
+    def execute(self, context):
+        tag = busy_tag_from_props(context.scene.busy_layout_props)
+        count = set_busy_dimensions_hidden(False, dim_tag=tag)
+        self.report({"INFO"}, f"'{tag}' 치수 오브젝트 {count}개를 표시했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_hide_selected_component_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.hide_selected_component_dimensions"
+    bl_label = "선택 컴포넌트 치수 숨김"
+    bl_description = "현재 선택한 부모/오브젝트에서 만든 치수선만 숨깁니다."
+
+    def execute(self, context):
+        sources = [o.name for o in context.selected_objects if not o.name.startswith("BL_")]
+        if not sources:
+            self.report({"ERROR"}, "치수를 숨길 선택 컴포넌트가 없습니다.")
+            return {"CANCELLED"}
+        count = set_busy_dimensions_hidden(True, sources=sources)
+        self.report({"INFO"}, f"선택 컴포넌트 치수 오브젝트 {count}개를 숨겼습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_delete_tag_dimensions(bpy.types.Operator):
+    bl_idname = "busy_layout.delete_tag_dimensions"
+    bl_label = "태그 치수 삭제"
+    bl_description = "현재 태그로 만든 치수선만 삭제합니다."
+
+    def execute(self, context):
+        tag = busy_tag_from_props(context.scene.busy_layout_props)
+        count = delete_busy_dimensions_by_tag(tag)
+        self.report({"INFO"}, f"'{tag}' 치수 오브젝트 {count}개를 삭제했습니다.")
         return {"FINISHED"}
 
 
@@ -1498,6 +1858,15 @@ class BL_PT_panel(bpy.types.Panel):
             row.prop(props, "dim_decimals")
             box.prop(props, "dim_suffix")
             row = box.row(align=True)
+            row.prop(props, "busy_tag_preset")
+            if props.busy_tag_preset == "CUSTOM":
+                row.prop(props, "busy_custom_tag", text="")
+            box.prop(props, "busy_tag_apply_children")
+            row = box.row(align=True)
+            row.prop(props, "component_dim_include_y")
+            row.prop(props, "component_dim_internal")
+            box.prop(props, "component_dim_internal_offset")
+            row = box.row(align=True)
             row.prop(props, "two_object_dim_mode")
             row.prop(props, "two_object_dim_axis")
             row = box.row(align=True)
@@ -1507,6 +1876,17 @@ class BL_PT_panel(bpy.types.Panel):
             box.operator("busy_layout.add_bbox_dimensions", icon="EMPTY_ARROWS")
             box.operator("busy_layout.add_two_object_dimension", icon="DRIVER_DISTANCE")
             box.operator("busy_layout.add_group_to_active_dimension", icon="OUTLINER_COLLECTION")
+            box.operator("busy_layout.assign_busy_tag", icon="BOOKMARKS")
+            row = box.row(align=True)
+            row.operator("busy_layout.add_selected_component_dimensions", icon="EMPTY_ARROWS")
+            row.operator("busy_layout.add_tag_component_dimensions", icon="OUTLINER_COLLECTION")
+            box.operator("busy_layout.add_active_parent_component_dimensions", icon="OUTLINER_COLLECTION")
+            row = box.row(align=True)
+            row.operator("busy_layout.hide_tag_dimensions", icon="HIDE_ON")
+            row.operator("busy_layout.show_tag_dimensions", icon="HIDE_OFF")
+            row = box.row(align=True)
+            row.operator("busy_layout.hide_selected_component_dimensions", icon="RESTRICT_VIEW_ON")
+            row.operator("busy_layout.delete_tag_dimensions", icon="TRASH")
             box.operator("busy_layout.clear_dimensions", icon="TRASH")
 
         box = section("ui_show_drawing_info", "4. 도면 정보")
@@ -1603,6 +1983,14 @@ classes = (
     BL_OT_add_bbox_dimensions,
     BL_OT_add_two_object_dimension,
     BL_OT_add_group_to_active_dimension,
+    BL_OT_assign_busy_tag,
+    BL_OT_add_selected_component_dimensions,
+    BL_OT_add_tag_component_dimensions,
+    BL_OT_add_active_parent_component_dimensions,
+    BL_OT_hide_tag_dimensions,
+    BL_OT_show_tag_dimensions,
+    BL_OT_hide_selected_component_dimensions,
+    BL_OT_delete_tag_dimensions,
     BL_OT_clear_dimensions,
     BL_OT_apply_fine_dimension_style,
     BL_OT_apply_draft_render_preset,

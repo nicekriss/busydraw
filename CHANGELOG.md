@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.10-dev
+- Added Busy tags for selected parents/components: furniture, wall, window, door, fixture, and custom.
+- Added selected-component dimensions that use each parent/Empty object's visible child bbox, so BlenderKit assets can be dimensioned as one component.
+- Added tag-component dimensions to generate dimensions for all top-level objects with the active Busy tag.
+- Added active-parent component dimensions: total parent outer dimensions plus smaller child-component internal dimensions along the parent's main axis.
+- Added tag dimension visibility controls to hide, show, or delete only the dimensions belonging to the active tag.
+- Added selected-component dimension hiding for local cleanup when one parent/component's dimensions get crowded.
+- Updated generated sheets to identify v0.10-dev.
+
 ## v0.9-dev
 - Added output view presets: Core, Plan + ISO, Elevations, and All.
 - Added a Quick Test render operator that applies draft output settings and renders the selected sheet in one step.
