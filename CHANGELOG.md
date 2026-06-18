@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9-dev
+- Added output view presets: Core, Plan + ISO, Elevations, and All.
+- Added a Quick Test render operator that applies draft output settings and renders the selected sheet in one step.
+- Added buttons to open the generated HTML sheet and output folder from the Busy Layout panel.
+- Updated generated sheets to identify v0.9-dev and keep image backgrounds explicitly white.
+
 ## v0.8-dev
 - Added PNG border-background post-processing so forced white background is reliable even when Blender renders a gray world/background.
 - In Real Scale mode, ISO view now defaults to Auto Fit to avoid extreme close-up/cropping.

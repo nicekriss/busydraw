@@ -4,7 +4,7 @@ Blender add-on prototype for generating SketchUp LayOut-style drawing sheets fro
 
 ## Current version
 
-v0.8-dev
+v0.9-dev
 
 ## Features
 
@@ -22,10 +22,11 @@ v0.8-dev
 - Adjustable viewport width/height in millimeters for scale calculation
 - v0.7.1 fixes forced white render background handling when an existing Blender world uses nodes
 - v0.8-dev adds output PNG background cleanup and keeps ISO on Auto Fit by default during Real Scale rendering
+- v0.9-dev adds view presets, quick test rendering, and one-click sheet/output folder opening
 
 ## Install
 
-Download `busy_layout_mvp_v071.py` or install the `busy_layout_mvp` package as a Blender add-on.
+During development, use the linked `busy_layout_mvp` package as a Blender add-on. Release downloads are published separately when a version is ready.
 
 ## v0.7 Real Scale
 
@@ -44,6 +45,5 @@ The v0.7 scale feature is an MVP control for Blender orthographic views, not a c
 
 ## Roadmap
 
-- v0.8: modular code split
-- v0.9: sheet viewport layout controls
+- v0.10: sheet viewport layout controls
 - v1.0: title block templates and collection-based line styles
