@@ -7,6 +7,7 @@
 - Updated generated sheets to identify v0.9-dev and keep image backgrounds explicitly white.
 - Added a section cut option to cut only objects taller than the cut plane, so low furniture can remain visible in plan views.
 - Changed two-object dimensions to default to nearest bounding-box faces instead of object origins, with Auto/X/Y axis controls.
+- Converted the numbered Busy Layout panel sections into foldouts so the growing option set stays manageable.
 
 ## v0.8-dev
 - Added PNG border-background post-processing so forced white background is reliable even when Blender renders a gray world/background.
