@@ -270,7 +270,9 @@ def scale_display_label(props):
     else:
         denominator_text = f"{denominator:g}"
     label = f"1:{denominator_text}"
-    if props.real_scale_margin_factor and abs(props.real_scale_margin_factor - 1.0) > 0.0001:
+    if (
+        props.real_scale_margin_factor and abs(props.real_scale_margin_factor - 1.0) > 0.0001
+    ) or getattr(props, "real_scale_safe_margin_mm", 0.0) > 0.0001:
         label += " adjusted"
     return label
 
@@ -287,12 +289,15 @@ def model_unit_display(props):
 
 def real_scale_ortho_scale(props, res_x=2480, res_y=1754):
     denominator = scale_denominator(props)
+    safe_margin_mm = max(float(getattr(props, "real_scale_safe_margin_mm", 0.0)), 0.0)
+    viewport_width_mm = props.viewport_width_mm + safe_margin_mm * 2.0
+    viewport_height_mm = props.viewport_height_mm + safe_margin_mm * 2.0
     if props.model_unit == "MILLIMETER":
-        viewport_height_world = props.viewport_height_mm * denominator
-        viewport_width_world = props.viewport_width_mm * denominator
+        viewport_height_world = viewport_height_mm * denominator
+        viewport_width_world = viewport_width_mm * denominator
     else:
-        viewport_height_world = props.viewport_height_mm * denominator / 1000.0
-        viewport_width_world = props.viewport_width_mm * denominator / 1000.0
+        viewport_height_world = viewport_height_mm * denominator / 1000.0
+        viewport_width_world = viewport_width_mm * denominator / 1000.0
 
     camera_aspect = max(float(res_x), 1.0) / max(float(res_y), 1.0)
     required_height = viewport_height_world
@@ -740,6 +745,7 @@ body {{
         {cut_note}<br>
         Scale mode: {html.escape(scale_mode_note)}<br>
         Viewport: {props.viewport_width_mm:g}mm x {props.viewport_height_mm:g}mm<br>
+        Safe margin: {getattr(props, "real_scale_safe_margin_mm", 0):g}mm<br>
         Model unit: {html.escape(model_unit_display(props))}<br>
         Drawing background: {"Forced white" if getattr(props, "force_white_background", False) else "Scene/transparent"}<br>
         브라우저에서 열고 인쇄 &gt; PDF 저장으로 출력하세요. Real Scale 모드는 카메라 Orthographic Scale을 기준으로 한 MVP 축척 기능입니다.
@@ -807,6 +813,13 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     )
     viewport_width_mm: bpy.props.FloatProperty(name="뷰포트 폭 mm", default=180.0, min=1.0)
     viewport_height_mm: bpy.props.FloatProperty(name="뷰포트 높이 mm", default=120.0, min=1.0)
+    real_scale_safe_margin_mm: bpy.props.FloatProperty(
+        name="Real Scale safe margin mm",
+        default=10.0,
+        min=0.0,
+        max=100.0,
+        description="치수선과 외곽선이 잘리지 않도록 실제 뷰포트보다 넓게 렌더합니다. 0이면 선택 축척 그대로입니다.",
+    )
     real_scale_margin_factor: bpy.props.FloatProperty(
         name="Real Scale margin factor",
         default=1.0,
@@ -964,6 +977,22 @@ class BL_OT_clear_dimensions(bpy.types.Operator):
     def execute(self, context):
         count = delete_busy_dimensions()
         self.report({"INFO"}, f"치수선 {count}개를 삭제했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_apply_fine_dimension_style(bpy.types.Operator):
+    bl_idname = "busy_layout.apply_fine_dimension_style"
+    bl_label = "Fine 치수 스타일 적용"
+    bl_description = "현재 모델 단위 기준으로 얇고 덜 투박한 도면용 치수선 값을 적용합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        props.dim_offset = 0.28
+        props.dim_line_thickness = 0.003
+        props.dim_tick_size = 0.055
+        props.dim_text_size = 0.115
+        props.dim_text_offset = 0.045
+        self.report({"INFO"}, "Fine 치수 스타일을 적용했습니다. 기존 치수선은 삭제 후 다시 생성해야 반영됩니다.")
         return {"FINISHED"}
 
 
@@ -1130,6 +1159,7 @@ class BL_PT_panel(bpy.types.Panel):
         row.prop(props, "dim_unit_scale")
         row.prop(props, "dim_decimals")
         box.prop(props, "dim_suffix")
+        box.operator("busy_layout.apply_fine_dimension_style", icon="GREASEPENCIL")
         box.operator("busy_layout.add_bbox_dimensions", icon="EMPTY_ARROWS")
         box.operator("busy_layout.add_two_object_dimension", icon="DRIVER_DISTANCE")
         box.operator("busy_layout.clear_dimensions", icon="TRASH")
@@ -1151,7 +1181,7 @@ class BL_PT_panel(bpy.types.Panel):
         box.prop(props, "sheet_columns")
 
         box = layout.box()
-        box.label(text="6. 축척 v0.7")
+        box.label(text="6. 축척 v0.8")
         box.prop(props, "scale_mode")
         if props.scale_mode == "REAL_SCALE":
             box.prop(props, "scale_preset")
@@ -1161,6 +1191,7 @@ class BL_PT_panel(bpy.types.Panel):
             row = box.row(align=True)
             row.prop(props, "viewport_width_mm")
             row.prop(props, "viewport_height_mm")
+            box.prop(props, "real_scale_safe_margin_mm")
             box.prop(props, "real_scale_margin_factor")
             box.prop(props, "real_scale_iso_auto_fit")
             box.label(text=f"현재 표기: Scale: {scale_display_label(props)}")
@@ -1210,6 +1241,7 @@ classes = (
     BL_OT_add_bbox_dimensions,
     BL_OT_add_two_object_dimension,
     BL_OT_clear_dimensions,
+    BL_OT_apply_fine_dimension_style,
     BL_OT_render_active,
     BL_OT_render_all,
     BL_PT_panel,

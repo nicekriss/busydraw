@@ -4,6 +4,8 @@
 - Added PNG border-background post-processing so forced white background is reliable even when Blender renders a gray world/background.
 - In Real Scale mode, ISO view now defaults to Auto Fit to avoid extreme close-up/cropping.
 - HTML sheet cards can now show per-view scale labels, so ISO can display `Auto Fit` while plan/elevations display `1:50`.
+- Added `Real Scale safe margin mm` so dimension lines and border strokes can breathe without manually changing viewport size.
+- Added a Fine dimension style button for thinner lines, smaller ticks, and less heavy dimension text.
 
 ## v0.7.1
 - Fixed forced white background rendering when the Blender scene world uses nodes.
