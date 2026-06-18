@@ -79,6 +79,14 @@ def bbox_min_max(corners):
     return Vector((min(xs), min(ys), min(zs))), Vector((max(xs), max(ys), max(zs)))
 
 
+def object_bbox_min_max(obj):
+    try:
+        return bbox_min_max([obj.matrix_world @ Vector(c) for c in obj.bound_box])
+    except Exception:
+        loc = obj.matrix_world.translation
+        return loc.copy(), loc.copy()
+
+
 def bbox_center_and_diag(corners):
     min_v, max_v = bbox_min_max(corners)
     center = (min_v + max_v) * 0.5
@@ -481,7 +489,16 @@ def apply_section_cut(context, objs, props):
 
     cutter = create_cut_cutter(context, objs, props.cut_height, props.cut_keep_mode)
     modifiers = []
-    for obj in mesh_objects_for_boolean(objs):
+    boolean_objs = mesh_objects_for_boolean(objs)
+    if getattr(props, "section_cut_tall_only", True):
+        filtered = []
+        for obj in boolean_objs:
+            min_v, max_v = object_bbox_min_max(obj)
+            if max_v.z > props.cut_height:
+                filtered.append(obj)
+        boolean_objs = filtered
+
+    for obj in boolean_objs:
         try:
             mod = obj.modifiers.new("BL_TEMP_SECTION_CUT", "BOOLEAN")
             mod.operation = "INTERSECT"
@@ -633,6 +650,55 @@ def add_dimension_xy(name, p1, p2, offset_vec, props, label_override=""):
         rot = 1.57079632679
     objs.append(create_dim_text(name + "_TEXT", label, mid + text_offset, props.dim_text_size, mat, rot))
     return objs
+
+
+def overlap_mid(a_min, a_max, b_min, b_max):
+    lo = max(a_min, b_min)
+    hi = min(a_max, b_max)
+    if lo <= hi:
+        return (lo + hi) * 0.5
+    return ((a_min + a_max) * 0.5 + (b_min + b_max) * 0.5) * 0.5
+
+
+def bbox_gap_dimension_points(obj_a, obj_b, axis):
+    a_min, a_max = object_bbox_min_max(obj_a)
+    b_min, b_max = object_bbox_min_max(obj_b)
+    a_center = (a_min + a_max) * 0.5
+    b_center = (b_min + b_max) * 0.5
+
+    if axis == "AUTO":
+        x_gap = max(b_min.x - a_max.x, a_min.x - b_max.x, 0.0)
+        y_gap = max(b_min.y - a_max.y, a_min.y - b_max.y, 0.0)
+        if x_gap > 0.0 and (y_gap <= 0.0 or x_gap <= y_gap):
+            axis = "X"
+        elif y_gap > 0.0:
+            axis = "Y"
+        else:
+            axis = "X" if abs(b_center.x - a_center.x) >= abs(b_center.y - a_center.y) else "Y"
+
+    if axis == "X":
+        y = overlap_mid(a_min.y, a_max.y, b_min.y, b_max.y)
+        if a_center.x <= b_center.x:
+            p1 = Vector((a_max.x, y, 0.0))
+            p2 = Vector((b_min.x, y, 0.0))
+        else:
+            p1 = Vector((a_min.x, y, 0.0))
+            p2 = Vector((b_max.x, y, 0.0))
+        offset = Vector((0.0, props.two_object_dim_offset, 0.0))
+    else:
+        x = overlap_mid(a_min.x, a_max.x, b_min.x, b_max.x)
+        if a_center.y <= b_center.y:
+            p1 = Vector((x, a_max.y, 0.0))
+            p2 = Vector((x, b_min.y, 0.0))
+        else:
+            p1 = Vector((x, a_min.y, 0.0))
+            p2 = Vector((x, b_max.y, 0.0))
+        offset = Vector((props.two_object_dim_offset, 0.0, 0.0))
+
+    if props.two_object_dim_line_position == "DIRECT":
+        offset = Vector((0.0, 0.0, 0.0))
+
+    return p1, p2, offset
 
 
 def delete_busy_dimensions():
@@ -857,7 +923,8 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     )
 
     use_section_cut: bpy.props.BoolProperty(name="단면 컷 사용", default=False, description="렌더 중에 임시 Boolean 컷을 적용합니다. 원본 모델에는 적용하지 않고 렌더 후 제거합니다.")
-    section_cut_plan_only: bpy.props.BoolProperty(name="평면도에만 컷 적용", default=True, description="켜면 TOP_PLAN 렌더에만 컷을 적용합니다.")
+    section_cut_plan_only: bpy.props.BoolProperty(name="평면도에만 컷 적용", default=True, description="켜면 TOP_PLAN 렌더에만 컷을 적용합니다. 정면/측면도도 자르려면 끄세요.")
+    section_cut_tall_only: bpy.props.BoolProperty(name="높은 오브젝트만 컷", default=True, description="켜면 컷 높이보다 낮은 테이블/가구는 Boolean 컷 대상에서 제외합니다.")
     cut_height: bpy.props.FloatProperty(name="컷 높이", default=1.2, description="Blender 씬 단위 기준 컷 높이입니다. 미터 단위 모델이면 1.2 = 1200mm입니다.")
     cut_keep_mode: bpy.props.EnumProperty(
         name="컷 방식",
@@ -879,6 +946,28 @@ class BL_Layout_Props(bpy.types.PropertyGroup):
     dim_unit_scale: bpy.props.FloatProperty(name="치수 배율", default=1000.0, description="미터 모델에서 mm로 표기하려면 1000. 밀리미터 모델이면 1.")
     dim_suffix: bpy.props.StringProperty(name="치수 접미사", default="")
     dim_decimals: bpy.props.IntProperty(name="소수점", default=0, min=0, max=4)
+    two_object_dim_mode: bpy.props.EnumProperty(
+        name="두 오브젝트 치수 기준",
+        items=[
+            ("BBOX_GAP", "가까운 면", "두 오브젝트 bbox의 가까운 면 사이 간격을 잽니다."),
+            ("CENTER", "중심", "두 오브젝트 원점 사이 거리를 잽니다."),
+        ],
+        default="BBOX_GAP",
+    )
+    two_object_dim_axis: bpy.props.EnumProperty(
+        name="간격 축",
+        items=[("AUTO", "Auto", ""), ("X", "X", ""), ("Y", "Y", "")],
+        default="AUTO",
+    )
+    two_object_dim_line_position: bpy.props.EnumProperty(
+        name="간격선 위치",
+        items=[
+            ("DIRECT", "직접 연결", "두 면 사이에 바로 치수선을 놓습니다."),
+            ("OFFSET", "오프셋", "치수선을 옆으로 빼서 표시합니다."),
+        ],
+        default="DIRECT",
+    )
+    two_object_dim_offset: bpy.props.FloatProperty(name="두 오브젝트 치수 오프셋", default=0.25, min=-10.0, max=10.0)
 
     project_title: bpy.props.StringProperty(name="도면 제목", default="Interior Drawing Sheet")
     client_name: bpy.props.StringProperty(name="클라이언트", default="")
@@ -970,8 +1059,8 @@ class BL_OT_add_bbox_dimensions(bpy.types.Operator):
 
 class BL_OT_add_two_object_dimension(bpy.types.Operator):
     bl_idname = "busy_layout.add_two_object_dimension"
-    bl_label = "두 오브젝트 중심 치수선"
-    bl_description = "선택한 두 오브젝트의 원점 사이 평면 치수선을 생성합니다."
+    bl_label = "두 오브젝트 간격 치수선"
+    bl_description = "선택한 두 오브젝트의 bbox 가까운 면 또는 중심 사이 평면 치수선을 생성합니다."
 
     def execute(self, context):
         props = context.scene.busy_layout_props
@@ -979,16 +1068,24 @@ class BL_OT_add_two_object_dimension(bpy.types.Operator):
         if len(objs) != 2:
             self.report({"ERROR"}, "오브젝트 2개를 선택해야 합니다.")
             return {"CANCELLED"}
-        p1 = objs[0].matrix_world.translation
-        p2 = objs[1].matrix_world.translation
-        vec = Vector((p2.x - p1.x, p2.y - p1.y, 0.0))
-        if vec.length <= 0.0001:
-            self.report({"ERROR"}, "XY 평면에서 두 오브젝트 위치가 같습니다.")
+        if props.two_object_dim_mode == "CENTER":
+            p1 = objs[0].matrix_world.translation
+            p2 = objs[1].matrix_world.translation
+            vec = Vector((p2.x - p1.x, p2.y - p1.y, 0.0))
+            if vec.length <= 0.0001:
+                self.report({"ERROR"}, "XY 평면에서 두 오브젝트 위치가 같습니다.")
+                return {"CANCELLED"}
+            dir_n = vec.normalized()
+            perp = Vector((-dir_n.y, dir_n.x, 0.0))
+            offset = perp * props.two_object_dim_offset
+        else:
+            p1, p2, offset = bbox_gap_dimension_points(objs[0], objs[1], props.two_object_dim_axis)
+
+        if (Vector((p2.x - p1.x, p2.y - p1.y, 0.0))).length <= 0.0001:
+            self.report({"ERROR"}, "두 오브젝트 간격이 0에 가깝습니다. 축을 바꿔보세요.")
             return {"CANCELLED"}
-        dir_n = vec.normalized()
-        perp = Vector((-dir_n.y, dir_n.x, 0.0))
-        add_dimension_xy("BL_DIM_TWO_OBJECTS", p1, p2, perp * props.dim_offset, props)
-        self.report({"INFO"}, "두 오브젝트 중심 치수선을 생성했습니다.")
+        add_dimension_xy("BL_DIM_TWO_OBJECTS", p1, p2, offset, props)
+        self.report({"INFO"}, "두 오브젝트 간격 치수선을 생성했습니다.")
         return {"FINISHED"}
 
 
@@ -1302,6 +1399,7 @@ class BL_PT_panel(bpy.types.Panel):
         box.label(text="2. 단면 컷")
         box.prop(props, "use_section_cut")
         box.prop(props, "section_cut_plan_only")
+        box.prop(props, "section_cut_tall_only")
         box.prop(props, "cut_height")
         box.prop(props, "cut_keep_mode")
         box.prop(props, "boolean_solver")
@@ -1321,6 +1419,12 @@ class BL_PT_panel(bpy.types.Panel):
         row.prop(props, "dim_unit_scale")
         row.prop(props, "dim_decimals")
         box.prop(props, "dim_suffix")
+        row = box.row(align=True)
+        row.prop(props, "two_object_dim_mode")
+        row.prop(props, "two_object_dim_axis")
+        row = box.row(align=True)
+        row.prop(props, "two_object_dim_line_position")
+        row.prop(props, "two_object_dim_offset")
         box.operator("busy_layout.apply_fine_dimension_style", icon="GREASEPENCIL")
         box.operator("busy_layout.add_bbox_dimensions", icon="EMPTY_ARROWS")
         box.operator("busy_layout.add_two_object_dimension", icon="DRIVER_DISTANCE")

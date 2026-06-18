@@ -5,6 +5,8 @@
 - Added a Quick Test render operator that applies draft output settings and renders the selected sheet in one step.
 - Added buttons to open the generated HTML sheet and output folder from the Busy Layout panel.
 - Updated generated sheets to identify v0.9-dev and keep image backgrounds explicitly white.
+- Added a section cut option to cut only objects taller than the cut plane, so low furniture can remain visible in plan views.
+- Changed two-object dimensions to default to nearest bounding-box faces instead of object origins, with Auto/X/Y axis controls.
 
 ## v0.8-dev
 - Added PNG border-background post-processing so forced white background is reliable even when Blender renders a gray world/background.
