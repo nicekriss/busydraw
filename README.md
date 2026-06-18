@@ -4,7 +4,7 @@ Blender add-on prototype for generating SketchUp LayOut-style drawing sheets fro
 
 ## Current version
 
-v0.7
+v0.7.1
 
 ## Features
 
@@ -20,10 +20,11 @@ v0.7
 - Real scale mode with 1:10, 1:20, 1:30, 1:50, 1:75, 1:100, 1:150, 1:200, and custom scale denominator presets
 - Meter and millimeter model unit options
 - Adjustable viewport width/height in millimeters for scale calculation
+- v0.7.1 fixes forced white render background handling when an existing Blender world uses nodes
 
 ## Install
 
-Download `busy_layout_mvp_v07.py` or install the `busy_layout_mvp` package as a Blender add-on.
+Download `busy_layout_mvp_v071.py` or install the `busy_layout_mvp` package as a Blender add-on.
 
 ## v0.7 Real Scale
 

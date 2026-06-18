@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.1
+- Fixed forced white background rendering when the Blender scene world uses nodes.
+- Made transparent background disabled while forced white background is enabled.
+- Saved forced-white renders as RGB PNGs instead of RGBA PNGs.
+
 ## v0.7
 - Added Auto Fit and Real Scale modes.
 - Added drawing scale presets from 1:10 through 1:200 plus custom denominators.
