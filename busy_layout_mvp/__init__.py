@@ -87,6 +87,20 @@ def object_bbox_min_max(obj):
         return loc.copy(), loc.copy()
 
 
+def objects_bbox_min_max(objs):
+    corners = []
+    for obj in objs:
+        try:
+            for c in obj.bound_box:
+                corners.append(obj.matrix_world @ Vector(c))
+        except Exception:
+            try:
+                corners.append(obj.matrix_world.translation)
+            except Exception:
+                continue
+    return bbox_min_max(corners)
+
+
 def bbox_center_and_diag(corners):
     min_v, max_v = bbox_min_max(corners)
     center = (min_v + max_v) * 0.5
@@ -660,9 +674,7 @@ def overlap_mid(a_min, a_max, b_min, b_max):
     return ((a_min + a_max) * 0.5 + (b_min + b_max) * 0.5) * 0.5
 
 
-def bbox_gap_dimension_points(obj_a, obj_b, axis):
-    a_min, a_max = object_bbox_min_max(obj_a)
-    b_min, b_max = object_bbox_min_max(obj_b)
+def bbox_gap_dimension_points_from_bounds(a_min, a_max, b_min, b_max, axis, props):
     a_center = (a_min + a_max) * 0.5
     b_center = (b_min + b_max) * 0.5
 
@@ -699,6 +711,12 @@ def bbox_gap_dimension_points(obj_a, obj_b, axis):
         offset = Vector((0.0, 0.0, 0.0))
 
     return p1, p2, offset
+
+
+def bbox_gap_dimension_points(obj_a, obj_b, axis, props):
+    a_min, a_max = object_bbox_min_max(obj_a)
+    b_min, b_max = object_bbox_min_max(obj_b)
+    return bbox_gap_dimension_points_from_bounds(a_min, a_max, b_min, b_max, axis, props)
 
 
 def delete_busy_dimensions():
@@ -1087,13 +1105,50 @@ class BL_OT_add_two_object_dimension(bpy.types.Operator):
             perp = Vector((-dir_n.y, dir_n.x, 0.0))
             offset = perp * props.two_object_dim_offset
         else:
-            p1, p2, offset = bbox_gap_dimension_points(objs[0], objs[1], props.two_object_dim_axis)
+            p1, p2, offset = bbox_gap_dimension_points(objs[0], objs[1], props.two_object_dim_axis, props)
 
         if (Vector((p2.x - p1.x, p2.y - p1.y, 0.0))).length <= 0.0001:
             self.report({"ERROR"}, "두 오브젝트 간격이 0에 가깝습니다. 축을 바꿔보세요.")
             return {"CANCELLED"}
         add_dimension_xy("BL_DIM_TWO_OBJECTS", p1, p2, offset, props)
         self.report({"INFO"}, "두 오브젝트 간격 치수선을 생성했습니다.")
+        return {"FINISHED"}
+
+
+class BL_OT_add_group_to_active_dimension(bpy.types.Operator):
+    bl_idname = "busy_layout.add_group_to_active_dimension"
+    bl_label = "선택 그룹 ↔ 활성 간격 치수선"
+    bl_description = "활성 오브젝트를 기준 대상으로 보고, 나머지 선택 오브젝트들을 하나의 그룹 bbox로 묶어 간격 치수선을 생성합니다."
+
+    def execute(self, context):
+        props = context.scene.busy_layout_props
+        active = context.view_layer.objects.active
+        if not active or active.name.startswith("BL_"):
+            self.report({"ERROR"}, "마지막에 선택한 활성 오브젝트가 필요합니다.")
+            return {"CANCELLED"}
+
+        group_objs = [o for o in context.selected_objects if o != active and o.visible_get() and not o.name.startswith("BL_")]
+        if not group_objs:
+            self.report({"ERROR"}, "활성 오브젝트 외에 그룹으로 볼 선택 오브젝트가 필요합니다.")
+            return {"CANCELLED"}
+
+        group_min, group_max = objects_bbox_min_max(group_objs)
+        active_min, active_max = object_bbox_min_max(active)
+        p1, p2, offset = bbox_gap_dimension_points_from_bounds(
+            group_min,
+            group_max,
+            active_min,
+            active_max,
+            props.two_object_dim_axis,
+            props,
+        )
+
+        if (Vector((p2.x - p1.x, p2.y - p1.y, 0.0))).length <= 0.0001:
+            self.report({"ERROR"}, "그룹과 활성 오브젝트 간격이 0에 가깝습니다. 축을 바꿔보세요.")
+            return {"CANCELLED"}
+
+        add_dimension_xy("BL_DIM_GROUP_TO_ACTIVE", p1, p2, offset, props)
+        self.report({"INFO"}, "선택 그룹과 활성 오브젝트 사이 간격 치수선을 생성했습니다.")
         return {"FINISHED"}
 
 
@@ -1443,6 +1498,7 @@ class BL_PT_panel(bpy.types.Panel):
             box.operator("busy_layout.apply_fine_dimension_style", icon="GREASEPENCIL")
             box.operator("busy_layout.add_bbox_dimensions", icon="EMPTY_ARROWS")
             box.operator("busy_layout.add_two_object_dimension", icon="DRIVER_DISTANCE")
+            box.operator("busy_layout.add_group_to_active_dimension", icon="OUTLINER_COLLECTION")
             box.operator("busy_layout.clear_dimensions", icon="TRASH")
 
         box = section("ui_show_drawing_info", "4. 도면 정보")
@@ -1538,6 +1594,7 @@ classes = (
     BL_OT_set_camera,
     BL_OT_add_bbox_dimensions,
     BL_OT_add_two_object_dimension,
+    BL_OT_add_group_to_active_dimension,
     BL_OT_clear_dimensions,
     BL_OT_apply_fine_dimension_style,
     BL_OT_apply_draft_render_preset,
